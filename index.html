@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TEDUH Project Map</title>
+    <link rel="stylesheet" href="styles.css?v=20260823-1" />
+  </head>
+  <body>
+    <header>
+      <div>
+        <p class="eyebrow">KPKT · TEDUH</p>
+        <h1>Private housing project map</h1>
+        <p class="subtitle">Search, filter and map projects using live TEDUH data</p>
+      </div>
+      <div class="header-actions">
+        <button id="locate-me" type="button">Locate me</button>
+        <button id="fit-map" type="button" disabled>Show all locations</button>
+      </div>
+    </header>
+
+    <main>
+      <section id="map" aria-label="Project locations map">
+        <div id="map-message" class="map-message">Enter a Google Maps API key to load the map.</div>
+      </section>
+
+      <aside>
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Live TEDUH results</p>
+            <h2>Projects</h2>
+          </div>
+          <span id="count" class="count">—</span>
+        </div>
+
+        <details class="filters" open>
+          <summary>Search filters</summary>
+          <form id="filter-form">
+            <div class="filter-section">
+              <p class="filter-title">Search</p>
+              <div class="filter-grid">
+                <label>Search by
+                  <select id="search-type">
+                    <option value="projek">Project</option>
+                    <option value="pemaju">Developer</option>
+                  </select>
+                </label>
+                <label>Keyword
+                  <input id="keyword" type="search" placeholder="Name or code" />
+                </label>
+              </div>
+            </div>
+
+            <div class="filter-section">
+              <p class="filter-title">Location</p>
+              <div class="filter-grid">
+                <label class="full">State
+                  <select id="state">
+                    <option value="">All states</option>
+                    <option value="01">Johor</option>
+                    <option value="02">Kedah</option>
+                    <option value="03">Kelantan</option>
+                    <option value="04">Melaka</option>
+                    <option value="05">Negeri Sembilan</option>
+                    <option value="06">Pahang</option>
+                    <option value="07">Pulau Pinang</option>
+                    <option value="08">Perak</option>
+                    <option value="09">Perlis</option>
+                    <option value="10">Selangor</option>
+                    <option value="11">Terengganu</option>
+                    <option value="12">Sabah</option>
+                    <option value="13">Sarawak</option>
+                    <option value="14">WP Kuala Lumpur</option>
+                    <option value="15">WP Labuan</option>
+                    <option value="16">WP Putrajaya</option>
+                  </select>
+                </label>
+                <label>District
+                  <select id="district" disabled><option value="">All districts</option></select>
+                </label>
+                <label>City
+                  <select id="city" disabled><option value="">All cities</option></select>
+                </label>
+              </div>
+            </div>
+
+            <div class="filter-section">
+              <p class="filter-title">Project details</p>
+              <div class="filter-grid">
+                <label class="full">Project status
+                  <select id="project-status">
+                    <option value="">All statuses</option>
+                    <option value="0">Belum Mula</option>
+                    <option value="1">Lancar</option>
+                    <option value="2">Sakit</option>
+                    <option value="3">Lewat</option>
+                    <option value="5">Siap Dengan CCC</option>
+                    <option value="7">Siap Dengan CFO</option>
+                    <option value="B">Permit Telah Dibatalkan</option>
+                  </select>
+                </label>
+                <label class="full">Permit expiry year
+                  <input id="permit-expiry-year" type="number" inputmode="numeric" min="1900" max="2200" step="1" placeholder="Enter year, e.g. 2029" />
+                </label>
+                <label>Minimum price (RM)
+                  <select id="price-min">
+                    <option value="">Any</option>
+                    <option value="100001">100,001</option><option value="200001">200,001</option>
+                    <option value="300001">300,001</option><option value="400001">400,001</option>
+                    <option value="500001">500,001</option><option value="600001">600,001</option>
+                    <option value="700001">700,001</option><option value="800001">800,001</option>
+                  </select>
+                </label>
+                <label>Maximum price (RM)
+                  <select id="price-max">
+                    <option value="">Any</option>
+                    <option value="100000">Below 100,000</option><option value="200000">200,000</option>
+                    <option value="300000">300,000</option><option value="400000">400,000</option>
+                    <option value="500000">500,000</option><option value="600000">600,000</option>
+                    <option value="9999999">And above</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div class="filter-actions">
+              <button id="reset-filters" type="button">Reset</button>
+              <button id="apply-filters" type="submit">Search projects</button>
+            </div>
+          </form>
+        </details>
+        <p id="summary" class="summary">Choose your filters, then click Search projects.</p>
+        <div id="project-list" class="project-list" aria-live="polite"></div>
+      </aside>
+    </main>
+    <div id="location-status" class="location-status" role="status" aria-live="polite" hidden></div>
+
+    <dialog id="key-dialog">
+      <form method="dialog" id="key-form">
+        <p class="eyebrow">One-time setup</p>
+        <h2>Connect Google Maps</h2>
+        <p>Paste a browser-restricted Google Maps JavaScript API key. It is saved only in this browser.</p>
+        <label for="maps-key">Google Maps API key</label>
+        <input id="maps-key" type="password" autocomplete="off" required placeholder="AIza…" />
+        <p id="key-error" class="form-error" hidden></p>
+        <menu>
+          <button value="cancel" type="button" id="cancel-key">Cancel</button>
+          <button value="default" type="submit">Load map</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <script src="config.js?v=20260823-1"></script>
+    <script src="app.js?v=20260823-1"></script>
+  </body>
+</html>
