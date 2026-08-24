@@ -1,5 +1,6 @@
-// Optional: add a browser-restricted Google Maps JavaScript API key here.
-// Leave it blank to use the one-time key dialog and browser storage instead.
-window.TEDUH_CONFIG = {
+// The Google key is intentionally public in a browser application, so restrict it
+// to Maps JavaScript API and your allowed HTTP referrers in Google Cloud Console.
+window.PROPERTY_NEARBY_CONFIG = {
   googleMapsApiKey: '',
+  apiBaseUrl: '/api/v1',
 };
