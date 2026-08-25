@@ -1,5 +1,6 @@
-const API_BASE = 'https://teduh.kpkt.gov.my/api';
-const API_ROOT = `${API_BASE}/projek-swasta`;
+const applicationConfig = window.PROPERTY_NEARBY_CONFIG || {};
+const API_BASE = String(applicationConfig.apiBaseUrl || '/api/v1').replace(/\/$/, '');
+const API_ROOT = `${API_BASE}/projects`;
 const DEFAULT_FILTERS = { q: '', search_type: 'projek', state: '', district: '', city: '', statusProjek: '', pricemin: '', pricemax: '' };
 const MAX_PROJECTS = 2000;
 const KEY_STORAGE = 'teduh-google-maps-key';
@@ -30,7 +31,7 @@ let loadController = null;
 let loadVersion = 0;
 
 function apiUrl(page, filters) {
-  const params = new URLSearchParams({ page: String(page), per_page: '20' });
+  const params = new URLSearchParams({ page: String(page), per_page: '100' });
   Object.entries(filters).forEach(([key, value]) => { if (value !== '') params.set(key, value); });
   return `${API_ROOT}?${params}`;
 }
@@ -65,12 +66,15 @@ async function fetchWithRetry(url, signal) {
 
 async function fetchJson(url, signal) {
   const response = await fetchWithRetry(url, signal);
-  if (!response.ok) throw new Error(`TEDUH API returned ${response.status}.`);
+  if (!response.ok) throw new Error(`Property API returned ${response.status}.`);
   return response.json();
 }
 
 function validCoordinate(project) {
-  const lat = Number(project.latitud); const lng = Number(project.longitud);
+  const rawLatitude = project.location?.latitude;
+  const rawLongitude = project.location?.longitude;
+  if (rawLatitude === null || rawLatitude === undefined || rawLongitude === null || rawLongitude === undefined) return false;
+  const lat = Number(rawLatitude); const lng = Number(rawLongitude);
   return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
 }
 
@@ -78,14 +82,14 @@ function escapeHtml(value = '') {
   return String(value).replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
 }
 
-function mapsLink(project) { return `https://www.google.com/maps/search/?api=1&query=${project.latitud},${project.longitud}`; }
+function mapsLink(project) { return `https://www.google.com/maps/search/?api=1&query=${project.location.latitude},${project.location.longitude}`; }
 
 function permitExpiry(project) {
-  return project.latest_lesen?.tarikh_luput || 'Not published';
+  return project.permit?.expiry_display || project.permit?.expiry_date || 'Not published';
 }
 
 function parsePermitExpiry(project) {
-  const value = project.latest_lesen?.tarikh_luput;
+  const value = project.permit?.expiry_date;
   if (!value) return null;
   const match = String(value).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (match) return new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]));
@@ -100,24 +104,21 @@ function matchesPermitExpiry(project) {
   return Boolean(expiry) && expiry.getFullYear() === selectedYear;
 }
 
-function priceNumber(value) {
-  const digits = String(value ?? '').replace(/[^0-9.]/g, '');
-  return digits ? Number(digits) : Number.NaN;
-}
-
 function formatPrice(value) {
   return new Intl.NumberFormat('en-MY', { style: 'currency', currency: 'MYR', maximumFractionDigits: 0 }).format(value);
 }
 
-function setProjectPrices(project, detail) {
-  const rows = (detail.status?.rows || []).filter(row => Number.isFinite(priceNumber(row.hargaMin)) || Number.isFinite(priceNumber(row.hargaMax)));
-  const minimum = Math.min(...rows.map(row => priceNumber(row.hargaMin)).filter(Number.isFinite));
-  const maximum = Math.max(...rows.map(row => priceNumber(row.hargaMax)).filter(Number.isFinite));
-  project.priceRows = rows;
-  project.priceLabel = Number.isFinite(minimum) && Number.isFinite(maximum)
-    ? `${formatPrice(minimum)} – ${formatPrice(maximum)}`
-    : Number.isFinite(minimum) ? `From ${formatPrice(minimum)}`
-      : Number.isFinite(maximum) ? `Up to ${formatPrice(maximum)}` : 'Price not published';
+function projectPrice(project) {
+  const rawMinimum = project.price?.minimum;
+  const rawMaximum = project.price?.maximum;
+  const minimum = Number(rawMinimum);
+  const maximum = Number(rawMaximum);
+  const hasMinimum = rawMinimum !== null && rawMinimum !== undefined && Number.isFinite(minimum);
+  const hasMaximum = rawMaximum !== null && rawMaximum !== undefined && Number.isFinite(maximum);
+  if (hasMinimum && hasMaximum) return `${formatPrice(minimum)} – ${formatPrice(maximum)}`;
+  if (hasMinimum) return `From ${formatPrice(minimum)}`;
+  if (hasMaximum) return `Up to ${formatPrice(maximum)}`;
+  return 'Price not published';
 }
 
 async function fetchPage(page, filters, signal) {
@@ -126,23 +127,22 @@ async function fetchPage(page, filters, signal) {
 
 async function fetchEveryProject(filters, signal, version) {
   const first = await fetchPage(1, filters, signal);
-  const firstPage = first.projects;
-  if (firstPage.total > MAX_PROJECTS) {
-    throw new Error(`${firstPage.total.toLocaleString('en-MY')} projects match. Please narrow the filters to ${MAX_PROJECTS.toLocaleString('en-MY')} projects or fewer.`);
+  if (first.meta.total > MAX_PROJECTS) {
+    throw new Error(`${first.meta.total.toLocaleString('en-MY')} projects match. Please narrow the filters to ${MAX_PROJECTS.toLocaleString('en-MY')} projects or fewer.`);
   }
-  const pages = Array.from({ length: firstPage.last_page - 1 }, (_, index) => index + 2);
+  const pages = Array.from({ length: first.meta.pages - 1 }, (_, index) => index + 2);
   const rest = [];
   for (let index = 0; index < pages.length; index += 5) {
     const batch = await Promise.all(pages.slice(index, index + 5).map(page => fetchPage(page, filters, signal)));
-    rest.push(...batch.flatMap(result => result.projects.data));
-    if (version === loadVersion) showProgress(`Loading matching projects… ${Math.min(index + 6, firstPage.last_page)} of ${firstPage.last_page} pages`);
+    rest.push(...batch.flatMap(result => result.data));
+    if (version === loadVersion) showProgress(`Loading matching projects… ${Math.min(index + 6, first.meta.pages)} of ${first.meta.pages} pages`);
   }
-  return { projects: [...firstPage.data, ...rest], total: firstPage.total };
+  return { projects: [...first.data, ...rest], total: first.meta.total, syncedAt: first.meta.last_successful_sync };
 }
 
 function replaceOptions(select, placeholder, items) {
   const selected = select.value;
-  const options = [new Option(placeholder, ''), ...items.map(item => new Option(item.keterangan, item.id))];
+  const options = [new Option(placeholder, ''), ...items.map(item => new Option(item.name, item.id))];
   select.replaceChildren(...options);
   if (options.some(option => option.value === selected)) select.value = selected;
   select.disabled = items.length === 0;
@@ -152,15 +152,15 @@ async function loadDistricts(stateId) {
   replaceOptions(elements.district, 'All districts', []);
   replaceOptions(elements.city, 'All cities', []);
   if (!stateId) return;
-  const districts = await fetchJson(`${API_BASE}/daerah-by-negeri?${new URLSearchParams({ negeri_id: stateId })}`);
-  replaceOptions(elements.district, 'All districts', districts.filter(item => !['Tiada Maklumat Daerah', 'Ulu Langat', 'Ulu Selangor'].includes(item.keterangan)));
+  const response = await fetchJson(`${API_BASE}/filters/districts?${new URLSearchParams({ state: stateId })}`);
+  replaceOptions(elements.district, 'All districts', response.data);
 }
 
 async function loadCities(districtId) {
   replaceOptions(elements.city, 'All cities', []);
   if (!districtId) return;
-  const cities = await fetchJson(`${API_BASE}/bandar-by-daerah?${new URLSearchParams({ daerah_id: districtId })}`);
-  replaceOptions(elements.city, 'All cities', cities);
+  const response = await fetchJson(`${API_BASE}/filters/cities?${new URLSearchParams({ district: districtId })}`);
+  replaceOptions(elements.city, 'All cities', response.data);
 }
 
 function selectedFilters() {
@@ -173,6 +173,7 @@ function selectedFilters() {
     statusProjek: elements.projectStatus.value,
     pricemin: elements.priceMin.value,
     pricemax: elements.priceMax.value,
+    permit_expiry_year: elements.permitExpiryYear.value,
   };
 }
 
@@ -185,31 +186,44 @@ function updateMaximumPrices() {
 }
 
 function markerContent(project) {
-  const priceRows = (project.priceRows || []).map(row => `<li>${escapeHtml(row.jenis || 'Unit')}: ${escapeHtml(row.hargaMin || '—')} – ${escapeHtml(row.hargaMax || '—')}</li>`).join('');
+  const priceRows = (project.components || []).map(row => `<li>${escapeHtml(row.type || 'Unit')}: ${row.price_minimum == null ? '—' : escapeHtml(formatPrice(row.price_minimum))} – ${row.price_maximum == null ? '—' : escapeHtml(formatPrice(row.price_maximum))}</li>`).join('');
   const priceDetails = priceRows ? `<p><b>Component prices</b></p><ul>${priceRows}</ul>` : '';
-  return `<div class="info-window"><h3>${escapeHtml(project.nama)}</h3><p>${escapeHtml(project.pemaju?.nama || 'Developer unavailable')}</p><p><b>Project ID:</b> ${escapeHtml(project.id)}</p><p><b>Status:</b> ${escapeHtml(project.status_project?.keterangan || '—')}</p><p><b>Price:</b> ${escapeHtml(project.priceLabel || 'Loading…')}</p>${priceDetails}<p><b>Tamat Sah Laku Permit Terkini:</b> ${escapeHtml(permitExpiry(project))}</p><p><b>Coordinates:</b> ${project.latitud}, ${project.longitud}</p><p><a target="_blank" rel="noopener" href="${mapsLink(project)}">Open in Google Maps</a></p></div>`;
+  return `<div class="info-window"><h3>${escapeHtml(project.name)}</h3><p>${escapeHtml(project.developer?.name || 'Developer unavailable')}</p><p><b>Project ID:</b> ${escapeHtml(project.id)}</p><p><b>Status:</b> ${escapeHtml(project.status?.label || '—')}</p><p><b>Price:</b> ${escapeHtml(projectPrice(project))}</p>${priceDetails}<p><b>Tamat Sah Laku Permit Terkini:</b> ${escapeHtml(permitExpiry(project))}</p><p><b>Coordinates:</b> ${project.location.latitude}, ${project.location.longitude}</p><p><a target="_blank" rel="noopener" href="${mapsLink(project)}">Open in Google Maps</a></p></div>`;
 }
 
 function statusTone(project) {
-  return ({ '0': 'pending', '1': 'smooth', '2': 'problem', '3': 'delayed', '5': 'complete', '7': 'complete', B: 'cancelled' })[project.status_projek] || 'neutral';
+  return ({ '0': 'pending', '1': 'smooth', '2': 'problem', '3': 'delayed', '5': 'complete', '7': 'complete', B: 'cancelled' })[project.status?.code] || 'neutral';
 }
 
-function focusProject(project) {
+async function loadProjectDetail(project) {
+  if (project.components || project.detailUnavailable) return project;
+  try {
+    const response = await fetchJson(`${API_ROOT}/${encodeURIComponent(project.id)}`);
+    Object.assign(project, response.data);
+  } catch {
+    project.detailUnavailable = true;
+  }
+  return project;
+}
+
+async function focusProject(project) {
   if (!validCoordinate(project)) return;
-  map.panTo({ lat: Number(project.latitud), lng: Number(project.longitud) });
+  map.panTo({ lat: Number(project.location.latitude), lng: Number(project.location.longitude) });
   map.setZoom(16);
   const marker = markers.find(item => item.project.id === project.id)?.marker;
   if (marker) { infoWindow.setContent(markerContent(project)); infoWindow.open({ map, anchor: marker }); }
   document.querySelectorAll('.project').forEach(node => node.classList.toggle('active', node.dataset.id === project.id));
+  await loadProjectDetail(project);
+  if (marker) infoWindow.setContent(markerContent(project));
 }
 
 function renderList(items = projects) {
   elements.list.replaceChildren(...items.map(project => {
     const button = document.createElement('button');
     button.className = 'project'; button.dataset.id = project.id;
-    const location = validCoordinate(project) ? `${project.latitud}, ${project.longitud}` : 'Exact coordinates unavailable';
-    const projectStatus = project.status_project?.keterangan || 'Status unavailable';
-    button.innerHTML = `<span class="project-top"><strong>${escapeHtml(project.nama)}</strong><span class="project-code">${escapeHtml(project.id)}</span></span><span class="developer">${escapeHtml(project.pemaju?.nama || 'Developer unavailable')}</span><span class="project-meta"><span class="status status-${statusTone(project)}">${escapeHtml(projectStatus)}</span><span class="permit">Permit until ${escapeHtml(permitExpiry(project))}</span></span><span class="price">${escapeHtml(project.priceLabel || 'Loading price…')}</span><span class="location">${location}</span>`;
+    const location = validCoordinate(project) ? `${project.location.latitude}, ${project.location.longitude}` : 'Exact coordinates unavailable';
+    const projectStatus = project.status?.label || 'Status unavailable';
+    button.innerHTML = `<span class="project-top"><strong>${escapeHtml(project.name)}</strong><span class="project-code">${escapeHtml(project.id)}</span></span><span class="developer">${escapeHtml(project.developer?.name || 'Developer unavailable')}</span><span class="project-meta"><span class="status status-${statusTone(project)}">${escapeHtml(projectStatus)}</span><span class="permit">Permit until ${escapeHtml(permitExpiry(project))}</span></span><span class="price">${escapeHtml(projectPrice(project))}</span><span class="location">${location}</span>`;
     button.addEventListener('click', () => focusProject(project));
     return button;
   }));
@@ -222,9 +236,14 @@ function addMarkers() {
   bounds = new google.maps.LatLngBounds();
   infoWindow = new google.maps.InfoWindow();
   markers = mappableProjects.map(project => {
-    const position = { lat: Number(project.latitud), lng: Number(project.longitud) };
-    const marker = new google.maps.Marker({ map, position, title: project.nama });
-    marker.addListener('click', () => { infoWindow.setContent(markerContent(project)); infoWindow.open({ map, anchor: marker }); });
+    const position = { lat: Number(project.location.latitude), lng: Number(project.location.longitude) };
+    const marker = new google.maps.Marker({ map, position, title: project.name });
+    marker.addListener('click', async () => {
+      infoWindow.setContent(markerContent(project));
+      infoWindow.open({ map, anchor: marker });
+      await loadProjectDetail(project);
+      infoWindow.setContent(markerContent(project));
+    });
     bounds.extend(position); return { project, marker };
   });
   if (markers.length) map.fitBounds(bounds, 40);
@@ -335,31 +354,6 @@ async function locateUser() {
   }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
 }
 
-async function fetchPriceDetails(filters, signal, version) {
-  const priceParams = new URLSearchParams();
-  if (filters.pricemin) priceParams.set('pricemin', filters.pricemin);
-  if (filters.pricemax) priceParams.set('pricemax', filters.pricemax);
-  for (let index = 0; index < projects.length; index += 4) {
-    await Promise.all(projects.slice(index, index + 4).map(async project => {
-      try {
-        const query = priceParams.size ? `?${priceParams}` : '';
-        const response = await fetchWithRetry(`${API_ROOT}/${encodeURIComponent(project.id)}${query}`, signal);
-        if (!response.ok) throw new Error('Price lookup failed');
-        setProjectPrices(project, await response.json());
-      } catch (error) {
-        if (error.name === 'AbortError') throw error;
-        project.priceLabel = 'Price unavailable';
-      }
-    }));
-    if (version !== loadVersion) return;
-    const complete = Math.min(index + 4, projects.length);
-    renderList();
-    elements.summary.textContent = `${mappableProjects.length} of ${projects.length} projects have valid coordinates. Loading price data: ${complete} of ${projects.length}.`;
-    await pause(100, signal);
-  }
-  if (version === loadVersion) elements.summary.textContent = `${mappableProjects.length} of ${projects.length} projects have valid coordinates. Price data loaded from TEDUH project details.`;
-}
-
 async function loadFilteredProjects() {
   const permitYear = elements.permitExpiryYear.value;
   if (permitYear && !/^\d{4}$/.test(permitYear)) {
@@ -373,7 +367,7 @@ async function loadFilteredProjects() {
   const filters = selectedFilters();
   elements.applyFilters.disabled = true;
   elements.fit.disabled = true;
-  showProgress('Loading matching projects from TEDUH…');
+  showProgress('Searching the synchronized project database…');
 
   try {
     const result = await fetchEveryProject(filters, signal, version);
@@ -385,8 +379,8 @@ async function loadFilteredProjects() {
     addMarkers();
     renderList();
     elements.fit.disabled = mappableProjects.length === 0;
-    elements.summary.textContent = `${projects.length} of ${result.total} projects match the permit year; ${mappableProjects.length} have valid coordinates and are mapped.${missing ? ` ${missing} are still listed but cannot be mapped exactly.` : ''}${permitFiltered ? ` ${permitFiltered} were excluded by permit year.` : ''}${projects.length ? ' Loading price data…' : ''}`;
-    await fetchPriceDetails(filters, signal, version);
+    const synchronized = result.syncedAt ? ` Last synchronized ${new Date(result.syncedAt).toLocaleString('en-MY')}.` : '';
+    elements.summary.textContent = `${projects.length} of ${result.total} projects match; ${mappableProjects.length} have valid coordinates and are mapped.${missing ? ` ${missing} are still listed but cannot be mapped exactly.` : ''}${permitFiltered ? ` ${permitFiltered} were excluded by permit year.` : ''}${synchronized}`;
   } catch (error) {
     if (error.name !== 'AbortError' && version === loadVersion) {
       elements.summary.textContent = `Could not load projects: ${error.message}`;
@@ -451,7 +445,7 @@ elements.resetFilters.addEventListener('click', async () => {
 elements.locate.addEventListener('click', locateUser);
 elements.fit.addEventListener('click', () => { if (markers.length) map.fitBounds(bounds, 40); });
 
-const configuredKey = window.TEDUH_CONFIG?.googleMapsApiKey?.trim();
+const configuredKey = applicationConfig.googleMapsApiKey?.trim();
 const storedKey = localStorage.getItem(KEY_STORAGE)?.trim();
 const startupKey = configuredKey || storedKey;
 if (startupKey) connect(startupKey); else elements.dialog.showModal();

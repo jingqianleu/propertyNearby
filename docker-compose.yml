@@ -1,0 +1,33 @@
+services:
+  database:
+    image: postgis/postgis:17-3.5-alpine
+    environment:
+      POSTGRES_DB: property_nearby
+      POSTGRES_USER: property_nearby
+      POSTGRES_PASSWORD: property_nearby
+    ports:
+      - "5432:5432"
+    volumes:
+      - property_nearby_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U property_nearby -d property_nearby"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://property_nearby:property_nearby@database:5432/property_nearby
+      DB_SSL: "false"
+      HOST: 0.0.0.0
+      PORT: 8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      database:
+        condition: service_healthy
+    command: ["sh", "-c", "pnpm db:migrate && node server/index.js"]
+
+volumes:
+  property_nearby_data:

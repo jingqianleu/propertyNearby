@@ -1,0 +1,22 @@
+{
+  "name": "property-nearby",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.19.0",
+  "description": "A cached TEDUH project API and Google Maps website backed by PostgreSQL/PostGIS.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server/index.js",
+    "dev": "node --env-file-if-exists=.env --watch server/index.js",
+    "db:migrate": "node --env-file-if-exists=.env scripts/migrate.js",
+    "sync": "node --env-file-if-exists=.env scripts/sync-teduh.js",
+    "sync:sample": "node --env-file-if-exists=.env scripts/sync-teduh.js --state=14 --max-pages=1 --detail-limit=5",
+    "check": "node --check server/index.js && node --check server/db.js && node --check server/projects.js && node --check scripts/sync-teduh.js && node --check app.js"
+  },
+  "dependencies": {
+    "pg": "^8.16.3"
+  }
+}

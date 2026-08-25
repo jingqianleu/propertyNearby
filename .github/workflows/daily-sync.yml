@@ -1,0 +1,34 @@
+name: Daily TEDUH sync
+
+on:
+  schedule:
+    # 02:00 Asia/Kuala_Lumpur (18:00 UTC on the previous day)
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: teduh-daily-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:migrate
+      - run: pnpm sync
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DB_SSL: "true"
+          TEDUH_API_BASE: https://teduh.kpkt.gov.my/api
+          TEDUH_DETAIL_CONCURRENCY: "3"
+          TEDUH_REQUEST_DELAY_MS: "150"
