@@ -103,6 +103,14 @@ CREATE TABLE IF NOT EXISTS sync_errors (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE states ENABLE ROW LEVEL SECURITY;
+ALTER TABLE districts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sync_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_components ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sync_errors ENABLE ROW LEVEL SECURITY;
+
 CREATE INDEX IF NOT EXISTS projects_location_gist_idx ON projects USING gist(location);
 CREATE INDEX IF NOT EXISTS projects_filters_idx ON projects(state_id, district_id, city_id, status_code) WHERE is_active;
 CREATE INDEX IF NOT EXISTS projects_permit_expiry_idx ON projects(permit_expiry) WHERE is_active;
@@ -117,4 +125,3 @@ INSERT INTO states (id, name) VALUES
   ('09', 'Perlis'), ('10', 'Selangor'), ('11', 'Terengganu'), ('12', 'Sabah'),
   ('13', 'Sarawak'), ('14', 'WP Kuala Lumpur'), ('15', 'WP Labuan'), ('16', 'WP Putrajaya')
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
-
